@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <err.h>
 #include <sys/types.h>
@@ -83,15 +84,25 @@ int main(int argc, char **argv)
                                            &client_addrlen[i]);
 
 	char buf[65536];
-
+        bool first = true;
         for (;;)
         {
                 int n = recv(server_fd, buf, sizeof(buf), 0);
                 if (n < 0)
                         continue;
-                for (i = 0; i < n_cli; i++)
-                        sendto(client_fd[i], buf, n, 0,
-                               client_addr[i], client_addrlen[i]);
+                if (first) {
+                        printf("got first packet (%d bytes)\n", n);
+                        first = false;
+                }
+                for (i = 0; i < n_cli; i++) {
+                        int ret = sendto(client_fd[i], buf, n, 0,
+                                         client_addr[i], client_addrlen[i]);
+                        if (ret < 0) {
+                                warn("sendto (%d)", i);
+                        } else if (ret != n) {
+                                warnx("short send (%d): %d/%d", i, ret, n);
+                        }
+                }
         }
 }
 
