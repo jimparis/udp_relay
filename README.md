@@ -11,7 +11,7 @@ Simple UDP relay that supports multiple destinations. All received data is sent 
 
 ```
 udp_relay <source> <destination_1> [ <destination_N ...> ]
-    where <source> and <destination> format is: <ip>:<port>
+    where <source> and <destination> format is: <host>:<port>
 ```
 eg.
 ```

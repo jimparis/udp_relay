@@ -1,73 +1,97 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <err.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <netdb.h>
 
-int to_sockaddr_in(char *ip, char *port, struct sockaddr_in *a) {
-	a->sin_family = AF_INET;
-	a->sin_port = htons(atoi(port));
-	a->sin_addr.s_addr = inet_addr(ip);
-	return 0;
+int get_address(const char *hostport, struct sockaddr **addr_out,
+                socklen_t *addrlen_out)
+{
+        char *host;
+        char *port;
+        int ret;
+
+        host = strdup(hostport);
+        if (host == NULL)
+                err(1, "strdup");
+        port = strrchr(host, ':');
+        if (port != NULL) {
+                *port = '\0';
+                port++;
+        }
+        if (port == NULL || strlen(host) == 0 || strlen(port) == 0)
+                errx(1, "badly formated address \"%s\"; use ip:port", hostport);
+
+        struct addrinfo hints = {
+                .ai_family = AF_UNSPEC,
+                .ai_socktype = SOCK_DGRAM,
+                .ai_protocol = IPPROTO_UDP,
+        };
+
+        struct addrinfo *result, *rp;
+        if ((ret = getaddrinfo(host, port, &hints, &result)) != 0)
+                errx(1, "%s: %s", hostport, gai_strerror(ret));
+        if (result == NULL)
+                errx(1, "can't resolve %s", hostport);
+        int sfd;
+        for (rp = result; rp != NULL; rp = rp->ai_next)
+        {
+                sfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+                if (sfd == -1)
+                        continue;
+
+                /* success -- copy sockaddr */
+                *addr_out = malloc(rp->ai_addrlen);
+                if (addr_out == NULL)
+                        err(1, "malloc");
+                memcpy(*addr_out, rp->ai_addr, rp->ai_addrlen);
+                *addrlen_out = rp->ai_addrlen;
+                break;
+        }
+        if (rp == NULL)
+                errx(1, "can't bind listen server");
+
+        freeaddrinfo(result);
+        free(host);
+
+        return sfd;
 }
 
-int parse_address(char *s, struct sockaddr_in *a) {
-	int ret = 0;
-	char *c = strrchr(s,':');
-	if (c) {
-		*c = 0;
-		ret = to_sockaddr_in(s,c+1,a);
-		*c = ':';
-	} else {
-		ret = 1;
-	}
-	return ret;
+int main(int argc, char **argv)
+{
+	if (argc < 3)
+		errx(1, "usage: %s <src:port> <dest:port> [dest:port...]");
+
+        struct sockaddr *server_addr;
+        socklen_t server_addrlen;
+        int server_fd;
+        server_fd = get_address(argv[1], &server_addr, &server_addrlen);
+        if (bind(server_fd, server_addr, server_addrlen) != 0)
+                err(1, "bind");
+
+        int i;
+        int n_cli = argc - 2;
+
+        struct sockaddr *client_addr[n_cli];
+        socklen_t client_addrlen[n_cli];
+        int client_fd[n_cli];
+        for (i = 0; i < n_cli; i++)
+                client_fd[i] = get_address(argv[2 + i], &client_addr[i],
+                                           &client_addrlen[i]);
+
+	char buf[65536];
+
+        for (;;)
+        {
+                int n = recv(server_fd, buf, sizeof(buf), 0);
+                if (n < 0)
+                        continue;
+                for (i = 0; i < n_cli; i++)
+                        sendto(client_fd[i], buf, n, 0,
+                               client_addr[i], client_addrlen[i]);
+        }
 }
 
-
-int main(int argc, char **argv) {
-	if ( argc < 3 ) {
-		printf("usage: udp_relay <source> <dest1> [ <dest2> ... ]\n");
-		exit(1);
-	}
-
-	struct sockaddr_in s;
-	struct sockaddr_in d[10];
-	int dcount = 0, i;
-
-	if ( parse_address(argv[1],&s) ) {
-		printf("error: could not resolve source address: %s\n",argv[1]);
-		return 1;
-	}
-
-	for (i=2;i<argc&&dcount<10;i++) {
-		if ( parse_address(argv[i],&d[dcount]) ) {
-			printf("error: could not resolve destination address: %s\n",argv[i]);
-			return 1;
-		}
-		dcount++;
-	}
-
-	int sock = socket(PF_INET,SOCK_DGRAM,IPPROTO_IP);
-	if ( sock < 0 ) {
-		perror("socket()");
-		return 1;
-	}
-	if ( bind(sock,(struct sockaddr*)&s,sizeof(s)) ) {
-		perror("bind()");
-		return 1;
-	}
-
-
-	char buffer[65536];
-	while (1) {
-		int n = recv(sock,buffer,sizeof(buffer),0);
-		if ( n < 0 ) continue;
-		for (i=0;i<dcount;i++) {
-			sendto(sock,buffer,n,0,(struct sockaddr*)&d[i],sizeof(d[i]));
-		}
-	}
-
-	return 0;	
-}

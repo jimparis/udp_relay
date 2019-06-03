@@ -1,6 +1,7 @@
 The MIT License (MIT)
 
 Copyright (c) 2014 Władysław Bodzek
+Copyright (c) 2019 Jim Paris
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
